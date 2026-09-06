@@ -127,17 +127,6 @@
             border-radius: 6px;
             transition: all 0.3s ease;
         }
-        .error-box {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #fca5a5;
-            padding: 15px;
-            border-radius: 12px;
-            text-align: center;
-            margin-top: 15px;
-            display: none;
-            font-size: 0.95rem;
-        }
     </style>
 </head>
 <body>
@@ -146,7 +135,7 @@
         <div class="header">
             <h1>The Briefing</h1>
             <p class="subtitle">Curated global news, delivered like a radio broadcast.</p>
-            <span class="voice-badge">🎙️ Cloud Voice: Google Neural (UK)</span>
+            <span class="voice-badge" id="voiceBadge">🎙️ Detecting best voice...</span>
         </div>
         
         <div class="controls">
@@ -156,15 +145,48 @@
         
         <div id="progress-bar" class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
         <p id="status"></p>
-        <div id="error-box" class="error-box"></div>
         
         <div id="transcript"></div>
     </div>
 
     <script>
-        let audioElements = [];
-        let currentChunkIndex = 0;
+        let synthesizer = window.speechSynthesis;
+        let voices = [];
+        let currentUtterance = null;
         let isPlaying = false;
+
+        // Load voices immediately
+        function loadVoices() { 
+            voices = synthesizer.getVoices(); 
+            const bestVoice = getBestVoice();
+            if (bestVoice) {
+                document.getElementById('voiceBadge').innerText = `🎙️ Using: ${bestVoice.name}`;
+            }
+        }
+        loadVoices();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = loadVoices;
+        }
+
+        // Aggressively target the HIGHEST quality voices on iOS
+        function getBestVoice() {
+            const preferred = [
+                "Samantha",           // iOS premium US female
+                "Daniel",             // iOS premium UK male
+                "Karen",              // iOS premium Australian female
+                "Natural",            // Windows natural voices
+                "Neural",             // Windows neural voices
+                "Google UK English",  // Chrome high-quality
+                "Microsoft David",    // Windows high-quality
+                "Microsoft Zira"      // Windows high-quality
+            ];
+            
+            for (let keyword of preferred) {
+                const match = voices.find(v => v.name.includes(keyword) && v.lang.startsWith('en'));
+                if (match) return match;
+            }
+            return voices.find(v => v.lang.startsWith('en')) || voices[0];
+        }
 
         function cleanText(text) {
             if (!text) return "";
@@ -178,28 +200,10 @@
                 .trim();
         }
 
-        // Smart chunking to respect Google TTS character limits
-        function chunkText(text, maxLength = 180) {
-            const chunks = [];
-            let current = "";
-            const words = text.split(" ");
-            for (let word of words) {
-                if ((current + " " + word).length > maxLength) {
-                    if (current) chunks.push(current.trim());
-                    current = word;
-                } else {
-                    current += (current ? " " : "") + word;
-                }
-            }
-            if (current) chunks.push(current.trim());
-            return chunks;
-        }
-
         async function fetchBriefingData() {
             updateStatus("Fetching top global stories...");
             document.getElementById('progress-bar').style.display = 'block';
             document.getElementById('progress-fill').style.width = '50%';
-            document.getElementById('error-box').style.display = 'none';
 
             const RSS_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
             const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(RSS_URL)}`;
@@ -210,7 +214,7 @@
             const data = await response.json();
             if (data.status !== 'ok') throw new Error("News service returned an error");
             
-            const items = data.items.slice(0, 5); // 5 stories for a rich briefing
+            const items = data.items.slice(0, 5);
             const stories = [];
 
             for (let item of items) {
@@ -218,8 +222,8 @@
                 let rawContext = item.content || item.description || "";
                 let context = cleanText(rawContext);
                 
-                if (context.length > 150) context = context.substring(0, 150).trim() + "...";
-                else if (context.length < 30) context = "Details are still emerging on this story.";
+                if (context.length > 180) context = context.substring(0, 180).trim() + "...";
+                else if (context.length < 40) context = "Details are still emerging on this developing story.";
                 
                 stories.push({ title, context });
             }
@@ -234,81 +238,74 @@
                 weekday: 'long', day: 'numeric', month: 'long' 
             }).format(new Date());
 
-            let script = `Welcome to your global briefing for ${today}. Here are the top stories shaping our world right now.\n\n`;
+            let script = `Welcome to your global briefing for ${today}. `;
+            script += "I'm here with the top stories shaping our world right now. Let's begin.\n\n";
             
-            script += `We start with a major development: ${stories[0].title}. ${stories[0].context}\n\n`;
-            if (stories[1]) script += `Turning to international affairs, ${stories[1].title}. ${stories[1].context}\n\n`;
-            if (stories[2]) script += `In other significant news, ${stories[2].title}. ${stories[2].context}\n\n`;
-            if (stories[3]) script += `Meanwhile, on the global stage, ${stories[3].title}. ${stories[3].context}\n\n`;
-            if (stories[4]) script += `And finally, keeping an eye on, ${stories[4].title}. ${stories[4].context}\n\n`;
+            script += `Our top story: ${stories[0].title}. ${stories[0].context}\n\n`;
             
-            script += `That's all for now. Thank you for listening, and stay informed.`;
+            if (stories[1]) {
+                script += `Turning to international developments. ${stories[1].title}. ${stories[1].context}\n\n`;
+            }
+            if (stories[2]) {
+                script += `In other significant news. ${stories[2].title}. ${stories[2].context}\n\n`;
+            }
+            if (stories[3]) {
+                script += `Meanwhile, on the global stage. ${stories[3].title}. ${stories[3].context}\n\n`;
+            }
+            if (stories[4]) {
+                script += `And finally, keeping an eye on. ${stories[4].title}. ${stories[4].context}\n\n`;
+            }
+            
+            script += `That's your briefing for today. Thank you for listening, and stay informed.`;
             return script;
         }
 
-        function prepareAndPlayAudio(script) {
-            updateStatus("Generating neural audio chunks...", true);
+        function speakScript(script) {
+            updateStatus("Playing briefing...", true);
             document.getElementById('stopBtn').style.display = 'block';
-            
+            synthesizer.cancel();
+
             const sentences = script.match(/[^\.!\?]+[\.!\?]+/g) || [script];
-            const allChunks = [];
+            const outputDiv = document.getElementById('transcript');
+            outputDiv.style.display = 'block';
+            outputDiv.innerHTML = sentences.map((s, i) => `<span id="sent-${i}">${s.trim()} </span>`).join('');
 
-            // 1. Split into chunks and generate Google TTS URLs
-            sentences.forEach((sentence, index) => {
-                const chunks = chunkText(sentence, 180);
-                chunks.forEach(chunk => {
-                    allChunks.push({
-                        sentenceIndex: index,
-                        // Google Translate TTS: Free, high-quality, UK English
-                        url: `https://translate.google.com/translate_tts?ie=UTF-8&tl=en-GB&client=tw-ob&q=${encodeURIComponent(chunk)}`
-                    });
-                });
-            });
-
-            // 2. Pre-create audio elements (Crucial for iOS Safari to allow sequential playback)
-            audioElements = allChunks.map(chunk => {
-                const a = new Audio(chunk.url);
-                a.preload = "auto";
-                return a;
-            });
-
-            // 3. Start playback sequence
+            let current = 0;
             isPlaying = true;
-            currentChunkIndex = 0;
-            playNextChunk(allChunks);
-        }
 
-        function playNextChunk(allChunks) {
-            if (!isPlaying || currentChunkIndex >= audioElements.length) {
-                finishBriefing();
-                return;
+            function speakNext() {
+                if (!isPlaying || current >= sentences.length) {
+                    finishBriefing();
+                    return;
+                }
+
+                // Update karaoke highlight
+                document.querySelectorAll('#transcript span').forEach(el => el.classList.remove('highlight'));
+                const currentEl = document.getElementById(`sent-${current}`);
+                if (currentEl) {
+                    currentEl.classList.add('highlight');
+                    currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+
+                currentUtterance = new SpeechSynthesisUtterance(sentences[current]);
+                currentUtterance.voice = getBestVoice();
+                currentUtterance.rate = 0.85; // Slower, more natural pace
+                currentUtterance.pitch = 1.0;
+                currentUtterance.volume = 1.0;
+
+                currentUtterance.onend = () => { 
+                    current++; 
+                    speakNext(); 
+                };
+                currentUtterance.onerror = () => { 
+                    current++; 
+                    speakNext(); 
+                };
+
+                synthesizer.speak(currentUtterance);
             }
 
-            // Update Karaoke Highlight
-            const currentSentenceIdx = allChunks[currentChunkIndex].sentenceIndex;
-            document.querySelectorAll('#transcript span').forEach(el => el.classList.remove('highlight'));
-            const currentEl = document.getElementById(`sent-${currentSentenceIdx}`);
-            if (currentEl) {
-                currentEl.classList.add('highlight');
-                currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-
-            const audio = audioElements[currentChunkIndex];
-            audio.onended = () => {
-                currentChunkIndex++;
-                playNextChunk(allChunks);
-            };
-            audio.onerror = () => {
-                console.warn("Audio chunk failed, skipping...");
-                currentChunkIndex++;
-                playNextChunk(allChunks);
-            };
-            
-            audio.play().catch(err => {
-                console.error("Play blocked:", err);
-                showError("Audio playback blocked by browser. Please tap Generate again.");
-                finishBriefing();
-            });
+            speakNext();
         }
 
         async function startBriefing() {
@@ -319,26 +316,19 @@
 
             try {
                 const stories = await fetchBriefingData();
-                updateStatus("Writing radio script...");
+                updateStatus("Preparing your briefing...");
                 const script = buildRadioScript(stories);
-                
-                // Show transcript with sentence spans for highlighting
-                const transcriptDiv = document.getElementById('transcript');
-                transcriptDiv.style.display = 'block';
-                const sentences = script.match(/[^\.!\?]+[\.!\?]+/g) || [script];
-                transcriptDiv.innerHTML = sentences.map((s, i) => `<span id="sent-${i}">${s.trim()} </span>`).join('');
-                
-                prepareAndPlayAudio(script);
+                speakScript(script);
             } catch (error) {
                 console.error("Briefing Error:", error);
-                showError(`Failed to fetch news: ${error.message}`);
+                updateStatus(`Error: ${error.message}. Please try again.`);
                 btn.disabled = false;
             }
         }
 
         function stopBriefing() {
             isPlaying = false;
-            audioElements.forEach(a => { a.pause(); a.currentTime = 0; });
+            synthesizer.cancel();
             finishBriefing();
         }
 
@@ -348,15 +338,6 @@
             document.getElementById('generateBtn').disabled = false;
             document.getElementById('stopBtn').style.display = 'none';
             document.querySelectorAll('#transcript span').forEach(el => el.classList.remove('highlight'));
-        }
-
-        function showError(msg) {
-            const el = document.getElementById('error-box');
-            el.innerText = msg;
-            el.style.display = 'block';
-            updateStatus("Ready to try again.");
-            document.getElementById('generateBtn').disabled = false;
-            document.getElementById('stopBtn').style.display = 'none';
         }
 
         function updateStatus(msg, isPlaying = false) {
