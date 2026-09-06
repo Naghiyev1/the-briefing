@@ -119,7 +119,13 @@
             color: #cbd5e1;
             display: none;
             box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
-            white-space: pre-wrap;
+        }
+        .highlight {
+            background: rgba(139, 92, 246, 0.25);
+            color: #f8fafc;
+            padding: 2px 6px;
+            border-radius: 6px;
+            transition: all 0.3s ease;
         }
         .error-box {
             background: rgba(239, 68, 68, 0.1);
@@ -140,7 +146,7 @@
         <div class="header">
             <h1>The Briefing</h1>
             <p class="subtitle">Curated global news, delivered like a radio broadcast.</p>
-            <span class="voice-badge">🎙️ Neural Voice: Brian (UK)</span>
+            <span class="voice-badge">🎙️ Cloud Voice: Google Neural (UK)</span>
         </div>
         
         <div class="controls">
@@ -156,7 +162,9 @@
     </div>
 
     <script>
-        let audioPlayer = null;
+        let audioElements = [];
+        let currentChunkIndex = 0;
+        let isPlaying = false;
 
         function cleanText(text) {
             if (!text) return "";
@@ -168,6 +176,23 @@
                 .replace(/<[^>]*>/g, '')
                 .replace(/\s+/g, ' ')
                 .trim();
+        }
+
+        // Smart chunking to respect Google TTS character limits
+        function chunkText(text, maxLength = 180) {
+            const chunks = [];
+            let current = "";
+            const words = text.split(" ");
+            for (let word of words) {
+                if ((current + " " + word).length > maxLength) {
+                    if (current) chunks.push(current.trim());
+                    current = word;
+                } else {
+                    current += (current ? " " : "") + word;
+                }
+            }
+            if (current) chunks.push(current.trim());
+            return chunks;
         }
 
         async function fetchBriefingData() {
@@ -185,7 +210,7 @@
             const data = await response.json();
             if (data.status !== 'ok') throw new Error("News service returned an error");
             
-            const items = data.items.slice(0, 4); // Reduced to 4 to guarantee perfect length
+            const items = data.items.slice(0, 5); // 5 stories for a rich briefing
             const stories = [];
 
             for (let item of items) {
@@ -193,12 +218,9 @@
                 let rawContext = item.content || item.description || "";
                 let context = cleanText(rawContext);
                 
-                // STRICT LENGTH LIMIT: Keep context punchy to avoid API URL limits
-                if (context.length > 120) {
-                    context = context.substring(0, 120).trim() + "...";
-                } else if (context.length < 30) {
-                    context = "Details are still emerging on this story.";
-                }
+                if (context.length > 150) context = context.substring(0, 150).trim() + "...";
+                else if (context.length < 30) context = "Details are still emerging on this story.";
+                
                 stories.push({ title, context });
             }
             
@@ -212,57 +234,79 @@
                 weekday: 'long', day: 'numeric', month: 'long' 
             }).format(new Date());
 
-            let script = `Hello, and welcome to your briefing for ${today}. `;
-            script += "Here are the top stories you need to know.\n\n";
+            let script = `Welcome to your global briefing for ${today}. Here are the top stories shaping our world right now.\n\n`;
             
-            script += `We begin with: ${stories[0].title}. ${stories[0].context}\n\n`;
+            script += `We start with a major development: ${stories[0].title}. ${stories[0].context}\n\n`;
+            if (stories[1]) script += `Turning to international affairs, ${stories[1].title}. ${stories[1].context}\n\n`;
+            if (stories[2]) script += `In other significant news, ${stories[2].title}. ${stories[2].context}\n\n`;
+            if (stories[3]) script += `Meanwhile, on the global stage, ${stories[3].title}. ${stories[3].context}\n\n`;
+            if (stories[4]) script += `And finally, keeping an eye on, ${stories[4].title}. ${stories[4].context}\n\n`;
             
-            if (stories[1]) script += `Next, ${stories[1].title}. ${stories[1].context}\n\n`;
-            if (stories[2]) script += `In other news, ${stories[2].title}. ${stories[2].context}\n\n`;
-            if (stories[3]) script += `And finally, ${stories[3].title}. ${stories[3].context}\n\n`;
-            
-            script += `That is your briefing. Stay informed.`;
+            script += `That's all for now. Thank you for listening, and stay informed.`;
             return script;
         }
 
-        function playAudio(script) {
-            updateStatus("Generating neural audio...", true);
+        function prepareAndPlayAudio(script) {
+            updateStatus("Generating neural audio chunks...", true);
             document.getElementById('stopBtn').style.display = 'block';
-            document.getElementById('error-box').style.display = 'none';
             
-            if (audioPlayer) {
-                audioPlayer.pause();
-                audioPlayer = null;
+            const sentences = script.match(/[^\.!\?]+[\.!\?]+/g) || [script];
+            const allChunks = [];
+
+            // 1. Split into chunks and generate Google TTS URLs
+            sentences.forEach((sentence, index) => {
+                const chunks = chunkText(sentence, 180);
+                chunks.forEach(chunk => {
+                    allChunks.push({
+                        sentenceIndex: index,
+                        // Google Translate TTS: Free, high-quality, UK English
+                        url: `https://translate.google.com/translate_tts?ie=UTF-8&tl=en-GB&client=tw-ob&q=${encodeURIComponent(chunk)}`
+                    });
+                });
+            });
+
+            // 2. Pre-create audio elements (Crucial for iOS Safari to allow sequential playback)
+            audioElements = allChunks.map(chunk => {
+                const a = new Audio(chunk.url);
+                a.preload = "auto";
+                return a;
+            });
+
+            // 3. Start playback sequence
+            isPlaying = true;
+            currentChunkIndex = 0;
+            playNextChunk(allChunks);
+        }
+
+        function playNextChunk(allChunks) {
+            if (!isPlaying || currentChunkIndex >= audioElements.length) {
+                finishBriefing();
+                return;
             }
 
-            const encodedText = encodeURIComponent(script);
-            const audioUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodedText}`;
-            
-            console.log("Attempting to play:", audioUrl); // For debugging
-            
-            audioPlayer = new Audio(audioUrl);
-            audioPlayer.crossOrigin = "anonymous";
-            
-            audioPlayer.onplay = () => {
-                updateStatus("Playing briefing...", true);
-            };
-            
-            audioPlayer.onended = () => {
-                finishBriefing();
-            };
-            
-            audioPlayer.onerror = (e) => {
-                console.error("Audio Error:", audioPlayer.error);
-                const errMsg = audioPlayer.error ? audioPlayer.error.message : "Unknown audio error";
-                showError(`Audio failed to load. ${errMsg}. (Text may be too long or network blocked it).`);
-                finishBriefing();
-            };
+            // Update Karaoke Highlight
+            const currentSentenceIdx = allChunks[currentChunkIndex].sentenceIndex;
+            document.querySelectorAll('#transcript span').forEach(el => el.classList.remove('highlight'));
+            const currentEl = document.getElementById(`sent-${currentSentenceIdx}`);
+            if (currentEl) {
+                currentEl.classList.add('highlight');
+                currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
 
-            // Explicitly load and play to satisfy iOS Safari requirements
-            audioPlayer.load();
-            audioPlayer.play().catch(err => {
-                console.error("Play promise rejected:", err);
-                showError("iOS blocked autoplay. Please tap 'Generate & Play' again.");
+            const audio = audioElements[currentChunkIndex];
+            audio.onended = () => {
+                currentChunkIndex++;
+                playNextChunk(allChunks);
+            };
+            audio.onerror = () => {
+                console.warn("Audio chunk failed, skipping...");
+                currentChunkIndex++;
+                playNextChunk(allChunks);
+            };
+            
+            audio.play().catch(err => {
+                console.error("Play blocked:", err);
+                showError("Audio playback blocked by browser. Please tap Generate again.");
                 finishBriefing();
             });
         }
@@ -278,11 +322,13 @@
                 updateStatus("Writing radio script...");
                 const script = buildRadioScript(stories);
                 
+                // Show transcript with sentence spans for highlighting
                 const transcriptDiv = document.getElementById('transcript');
                 transcriptDiv.style.display = 'block';
-                transcriptDiv.innerText = script;
+                const sentences = script.match(/[^\.!\?]+[\.!\?]+/g) || [script];
+                transcriptDiv.innerHTML = sentences.map((s, i) => `<span id="sent-${i}">${s.trim()} </span>`).join('');
                 
-                playAudio(script);
+                prepareAndPlayAudio(script);
             } catch (error) {
                 console.error("Briefing Error:", error);
                 showError(`Failed to fetch news: ${error.message}`);
@@ -291,18 +337,17 @@
         }
 
         function stopBriefing() {
-            if (audioPlayer) {
-                audioPlayer.pause();
-                audioPlayer.currentTime = 0;
-                audioPlayer = null;
-            }
+            isPlaying = false;
+            audioElements.forEach(a => { a.pause(); a.currentTime = 0; });
             finishBriefing();
         }
 
         function finishBriefing() {
+            isPlaying = false;
             updateStatus("Briefing complete.");
             document.getElementById('generateBtn').disabled = false;
             document.getElementById('stopBtn').style.display = 'none';
+            document.querySelectorAll('#transcript span').forEach(el => el.classList.remove('highlight'));
         }
 
         function showError(msg) {
