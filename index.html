@@ -2,12 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>The Briefing</title>
     <style>
-        /* --- PREMIUM UI STYLING --- */
         * { box-sizing: border-box; margin: 0; padding: 0; }
-
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             min-height: 100vh;
@@ -17,19 +15,10 @@
             justify-content: center;
             padding: 40px 20px;
             line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
         }
-
-        .container {
-            max-width: 600px;
-            width: 100%;
-        }
-
-        /* Header */
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-
+        .container { max-width: 600px; width: 100%; }
+        .header { text-align: center; margin-bottom: 40px; }
         h1 {
             font-size: 2.8rem;
             font-weight: 800;
@@ -39,14 +28,7 @@
             -webkit-text-fill-color: transparent;
             margin-bottom: 8px;
         }
-
-        .subtitle {
-            color: #94a3b8;
-            font-size: 1rem;
-            font-weight: 400;
-        }
-
-        /* Button */
+        .subtitle { color: #94a3b8; font-size: 1rem; font-weight: 400; }
         .btn {
             width: 100%;
             padding: 16px 32px;
@@ -55,30 +37,16 @@
             color: white;
             background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
             border: none;
-            border-radius: 50px; /* Pill shape */
+            border-radius: 50px;
             cursor: pointer;
             transition: all 0.3s ease;
             box-shadow: 0 10px 25px -5px rgba(139, 92, 246, 0.4);
             margin-bottom: 20px;
+            -webkit-tap-highlight-color: transparent;
         }
-
-        .btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 30px -5px rgba(139, 92, 246, 0.6);
-        }
-
-        .btn:active:not(:disabled) {
-            transform: translateY(0);
-        }
-
-        .btn:disabled {
-            background: #334155;
-            color: #64748b;
-            box-shadow: none;
-            cursor: not-allowed;
-        }
-
-        /* Status & Progress */
+        .btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 15px 30px -5px rgba(139, 92, 246, 0.6); }
+        .btn:active:not(:disabled) { transform: translateY(0); }
+        .btn:disabled { background: #334155; color: #64748b; box-shadow: none; cursor: not-allowed; }
         #status {
             text-align: center;
             font-size: 0.9rem;
@@ -89,7 +57,6 @@
             align-items: center;
             justify-content: center;
         }
-
         .playing-indicator {
             display: inline-block;
             width: 8px;
@@ -99,13 +66,11 @@
             margin-right: 8px;
             animation: pulse 1.5s infinite;
         }
-
         @keyframes pulse {
             0% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.5; transform: scale(0.8); }
             100% { opacity: 1; transform: scale(1); }
         }
-
         .progress-bar {
             width: 100%;
             height: 4px;
@@ -115,16 +80,12 @@
             overflow: hidden;
             display: none;
         }
-
         .progress-fill {
             height: 100%;
             background: linear-gradient(90deg, #3b82f6, #8b5cf6);
             width: 0%;
             transition: width 0.3s ease;
-            border-radius: 2px;
         }
-
-        /* Transcript Card (Glassmorphism) */
         #script-output {
             background: rgba(30, 41, 59, 0.6);
             backdrop-filter: blur(12px);
@@ -138,15 +99,12 @@
             display: none;
             box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
         }
-
-        /* Karaoke Highlight */
         .highlight {
             background: rgba(139, 92, 246, 0.25);
             color: #f8fafc;
             padding: 2px 6px;
             border-radius: 6px;
             transition: all 0.3s ease;
-            box-shadow: 0 0 15px rgba(139, 92, 246, 0.2);
         }
     </style>
 </head>
@@ -155,7 +113,7 @@
     <div class="container">
         <div class="header">
             <h1>The Briefing</h1>
-            <p class="subtitle">Contextual global news. 100% local AI. Listen anytime.</p>
+            <p class="subtitle">Deep context. Zero AI crashes. 100% free. Listen anytime.</p>
         </div>
         
         <button id="generateBtn" class="btn" onclick="startBriefing()">Generate & Play Briefing</button>
@@ -166,14 +124,10 @@
         <div id="script-output"></div>
     </div>
 
-    <script type="module">
-        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-
+    <script>
         let synthesizer = window.speechSynthesis;
         let voices = [];
-        let aiGenerator = null;
 
-        // 1. LOAD VOICES
         function loadVoices() { voices = synthesizer.getVoices(); }
         loadVoices();
         if (speechSynthesis.onvoiceschanged !== undefined) {
@@ -181,7 +135,7 @@
         }
 
         function getBestVoice() {
-            const preferred = ["Natural", "Neural", "Google", "Microsoft", "Samantha", "Daniel", "Aria"];
+            const preferred = ["Natural", "Neural", "Google", "Microsoft", "Samantha", "Daniel", "Aria", "Karen"];
             for (let keyword of preferred) {
                 const match = voices.find(v => v.name.includes(keyword) && v.lang.startsWith('en'));
                 if (match) return match;
@@ -189,72 +143,90 @@
             return voices.find(v => v.lang.startsWith('en')) || voices[0];
         }
 
-        // 2. FETCH NEWS (BBC World News)
-        async function fetchNews() {
-            updateStatus("Fetching today's top global stories...");
+        // 1. FETCH NEWS & DEEP CONTEXT
+        async function fetchBriefingData() {
+            updateStatus("Fetching top stories and gathering deep context...");
+            document.getElementById('progress-bar').style.display = 'block';
+            document.getElementById('progress-fill').style.width = '30%';
+
             const RSS_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
-            const CORS_PROXY = "https://api.allorigins.win/raw?url=";
-            
-            const response = await fetch(CORS_PROXY + encodeURIComponent(RSS_URL));
+            const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(RSS_URL)}`);
             const str = await response.text();
             const parser = new DOMParser();
             const xml = parser.parseFromString(str, "text/xml");
             
-            const items = Array.from(xml.querySelectorAll("item")).slice(0, 5);
-            return items.map(item => {
-                const title = item.querySelector("title")?.textContent || "Untitled";
-                const desc = item.querySelector("description")?.textContent?.replace(/<[^>]*>/g, '').trim() || "";
-                return `• ${title}: ${desc}`;
-            }).join("\n\n");
-        }
+            const items = Array.from(xml.querySelectorAll("item")).slice(0, 4);
+            const stories = [];
 
-        // 3. INITIALIZE LOCAL AI MODEL
-        async function loadAI() {
-            updateStatus("Loading local AI model (downloads ~100MB once, then caches forever)...");
-            document.getElementById('progress-bar').style.display = 'block';
-            
-            aiGenerator = await pipeline('text2text-generation', 'Xenova/LaMini-Flan-T5-248M', {
-                progress_callback: (data) => {
-                    if (data.status === 'progress') {
-                        const pct = Math.round(data.progress || 0);
-                        document.getElementById('progress-fill').style.width = pct + '%';
-                        updateStatus(`Downloading AI model: ${pct}%`);
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                const title = item.querySelector("title")?.textContent || "Untitled";
+                const link = item.querySelector("link")?.textContent || "";
+                const rssDesc = item.querySelector("description")?.textContent?.replace(/<[^>]*>/g, '').trim() || "";
+                
+                let context = rssDesc;
+                
+                // Use Jina AI Reader (free, no key) to get actual article depth
+                if (link && i < 3) { // Get deep context for top 3 stories
+                    try {
+                        updateStatus(`Reading full article for: ${title.substring(0, 25)}...`);
+                        document.getElementById('progress-fill').style.width = `${30 + (i * 20)}%`;
+                        
+                        const jinaRes = await fetch(`https://r.jina.ai/${link}`);
+                        const fullText = await jinaRes.text();
+                        
+                        // Extract meaningful sentences (skip title repeats and copyright footers)
+                        const sentences = fullText.match(/[^\.!\?]+[\.!\?]+/g) || [];
+                        const meaningful = sentences.filter(s => 
+                            s.length > 40 && 
+                            !s.toLowerCase().includes("copyright") && 
+                            !s.toLowerCase().includes("subscribe")
+                        ).slice(1, 4); // Take sentences 2, 3, and 4
+                        
+                        if (meaningful.length >= 2) {
+                            context = meaningful.join(" ");
+                        }
+                    } catch (e) {
+                        console.log("Jina fetch failed, falling back to RSS description");
                     }
                 }
-            });
+                stories.push({ title, context });
+            }
             
-            document.getElementById('progress-bar').style.display = 'none';
-            updateStatus("AI loaded. Synthesizing context...");
+            document.getElementById('progress-fill').style.width = '100%';
+            setTimeout(() => { document.getElementById('progress-bar').style.display = 'none'; }, 500);
+            return stories;
         }
 
-        // 4. GENERATE CONVERSATIONAL BRIEFING
-        async function generateScript(newsText) {
+        // 2. BUILD CONVERSATIONAL SCRIPT
+        function buildConversationalScript(stories) {
             const today = new Intl.DateTimeFormat('en-GB', { 
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+                weekday: 'long', day: 'numeric', month: 'long' 
             }).format(new Date());
 
-            const prompt = `You are a professional, engaging news anchor. Today's date is ${today}. 
-            Synthesize the following top global news items into a cohesive, conversational audio briefing. 
-            Provide clear context for why each story matters. Use natural transitions. 
-            Keep the total length around 200-250 words so it takes about 90 seconds to read. 
-            Do not use bullet points. Write in plain paragraphs. 
-            IMPORTANT: Do not say "Good morning" or "Good evening" unless it is contextually appropriate for the time of day in Europe. Just start directly with the news.
+            let script = `Here is your briefing for ${today}. \n\n`;
             
-            NEWS ITEMS:
-            ${newsText}`;
+            script += `Our top story: ${stories[0].title}. ${stories[0].context} \n\n`;
             
-            const output = await aiGenerator(prompt, {
-                max_new_tokens: 300,
-                temperature: 0.7,
-                repetition_penalty: 1.2
-            });
+            if (stories[1]) {
+                script += `In other news, ${stories[1].title}. ${stories[1].context} \n\n`;
+            }
             
-            return output[0].generated_text;
+            if (stories[2]) {
+                script += `Meanwhile, ${stories[2].title}. ${stories[2].context} \n\n`;
+            }
+            
+            if (stories[3]) {
+                script += `And finally, ${stories[3].title}. ${stories[3].context} \n\n`;
+            }
+            
+            script += `That is your briefing. Stay informed.`;
+            return script;
         }
 
-        // 5. TEXT-TO-SPEECH WITH KARAOKE HIGHLIGHTING
+        // 3. TEXT-TO-SPEECH WITH KARAOKE HIGHLIGHTING
         function speakScript(script) {
-            updateStatus("Playing audio briefing...", true); // true = show pulsing dot
+            updateStatus("Playing audio briefing...", true);
             synthesizer.cancel();
 
             const sentences = script.match(/[^\.!\?]+[\.!\?]+/g) || [script];
@@ -292,27 +264,23 @@
             speakNext();
         }
 
-        // 6. MAIN CONTROLLER
-        window.startBriefing = async function() {
+        // 4. MAIN CONTROLLER
+        async function startBriefing() {
             const btn = document.getElementById('generateBtn');
             btn.disabled = true;
             document.getElementById('script-output').style.display = 'none';
 
             try {
-                if (!aiGenerator) {
-                    await loadAI();
-                }
-                
-                const newsText = await fetchNews();
-                const script = await generateScript(newsText);
-                
+                const stories = await fetchBriefingData();
+                updateStatus("Weaving conversational script...");
+                const script = buildConversationalScript(stories);
                 speakScript(script);
             } catch (error) {
                 console.error(error);
-                updateStatus("Error generating briefing. Check console or try again.");
+                updateStatus("Error generating briefing. Please check your connection and try again.");
                 btn.disabled = false;
             }
-        };
+        }
 
         function updateStatus(msg, isPlaying = false) {
             const el = document.getElementById('status');
@@ -322,6 +290,9 @@
                 el.innerText = msg;
             }
         }
+        
+        // Expose to window for the button
+        window.startBriefing = startBriefing;
     </script>
 </body>
 </html>
