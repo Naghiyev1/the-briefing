@@ -18,7 +18,7 @@
             -webkit-font-smoothing: antialiased;
         }
         .container { max-width: 600px; width: 100%; }
-        .header { text-align: center; margin-bottom: 40px; }
+        .header { text-align: center; margin-bottom: 30px; }
         h1 {
             font-size: 2.8rem;
             font-weight: 800;
@@ -29,7 +29,16 @@
             margin-bottom: 8px;
         }
         .subtitle { color: #94a3b8; font-size: 1rem; font-weight: 400; margin-bottom: 10px; }
-        .voice-info { color: #64748b; font-size: 0.85rem; font-style: italic; }
+        .voice-badge { 
+            display: inline-block;
+            background: rgba(139, 92, 246, 0.15);
+            color: #c4b5fd;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
         
         .controls { display: flex; gap: 12px; margin-bottom: 20px; }
         .btn {
@@ -55,7 +64,7 @@
             flex: 0.4;
             background: #ef4444;
             box-shadow: 0 10px 25px -5px rgba(239, 68, 68, 0.4);
-            display: none; /* Hidden by default */
+            display: none;
         }
         .btn-stop:hover { background: #dc2626; transform: translateY(-2px); }
 
@@ -98,7 +107,7 @@
             width: 0%;
             transition: width 0.3s ease;
         }
-        #script-output {
+        #transcript {
             background: rgba(30, 41, 59, 0.6);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
@@ -110,13 +119,7 @@
             color: #cbd5e1;
             display: none;
             box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
-        }
-        .highlight {
-            background: rgba(139, 92, 246, 0.25);
-            color: #f8fafc;
-            padding: 2px 6px;
-            border-radius: 6px;
-            transition: all 0.3s ease;
+            white-space: pre-wrap;
         }
     </style>
 </head>
@@ -125,8 +128,8 @@
     <div class="container">
         <div class="header">
             <h1>The Briefing</h1>
-            <p class="subtitle">Clean, curated global news. 100% free. Listen anytime.</p>
-            <p class="voice-info" id="voiceInfo">Detecting best available voice...</p>
+            <p class="subtitle">Curated global news, delivered like a radio broadcast.</p>
+            <span class="voice-badge">🎙️ Neural Voice: Brian (UK)</span>
         </div>
         
         <div class="controls">
@@ -137,46 +140,22 @@
         <div id="progress-bar" class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
         <p id="status"></p>
         
-        <div id="script-output"></div it>
+        <div id="transcript"></div>
     </div>
 
     <script>
-        let synthesizer = window.speechSynthesis;
-        let voices = [];
-        let currentUtterance = null;
-
-        function loadVoices() { 
-            voices = synthesizer.getVoices(); 
-            const bestVoice = getBestVoice();
-            if (bestVoice) {
-                document.getElementById('voiceInfo').innerText = `Using voice: ${bestVoice.name}`;
-            }
-        }
-        loadVoices();
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = loadVoices;
-        }
-
-        function getBestVoice() {
-            // Aggressively target high-quality, natural-sounding voices
-            const preferred = ["Samantha", "Daniel", "Karen", "Natural", "Neural", "Google UK English Female", "Google US English"];
-            for (let keyword of preferred) {
-                const match = voices.find(v => v.name.includes(keyword) && v.lang.startsWith('en'));
-                if (match) return match;
-            }
-            return voices.find(v => v.lang.startsWith('en')) || voices[0];
-        }
+        let audioPlayer = null;
 
         // Rigorous text cleaner to ensure NO garbage reaches the speaker
         function cleanText(text) {
             if (!text) return "";
             return text
-                .replace(/\[.*?\]\(.*?\)/g, '') // Remove markdown links [text](url)
-                .replace(/https?:\/\/\S+/g, '') // Remove any stray URLs
+                .replace(/\[.*?\]\(.*?\)/g, '') // Remove markdown links
+                .replace(/https?:\/\/\S+/g, '') // Remove URLs
                 .replace(/Published Time:.*?Z/gi, '') // Remove timestamps
                 .replace(/Skip to content/gi, '')
-                .replace(/<[^>]*>/g, '') // Remove any remaining HTML tags
-                .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+                .replace(/<[^>]*>/g, '') // Remove HTML tags
+                .replace(/\s+/g, ' ') // Normalize spaces
                 .trim();
         }
 
@@ -195,16 +174,18 @@
             const data = await response.json();
             if (data.status !== 'ok') throw new Error("News service returned an error");
             
-            const items = data.items.slice(0, 4);
+            // Fetch top 5 stories for a richer briefing
+            const items = data.items.slice(0, 5);
             const stories = [];
 
             for (let item of items) {
                 const title = item.title || "Untitled";
-                // Clean the description rigorously
-                let context = cleanText(item.description);
+                // Use 'content' if available for more depth, otherwise fall back to 'description'
+                let rawContext = item.content || item.description || "";
+                let context = cleanText(rawContext);
                 
-                // If the cleaned context is too short, use a generic fallback so it doesn't sound broken
-                if (context.length < 20) {
+                // Ensure we have a meaningful sentence
+                if (context.length < 30) {
                     context = "Details are still emerging on this developing story.";
                 }
                 stories.push({ title, context });
@@ -215,76 +196,90 @@
             return stories;
         }
 
-        // 2. BUILD CONVERSATIONAL SCRIPT
-        function buildConversationalScript(stories) {
+        // 2. BUILD RADIO PRESENTER SCRIPT
+        function buildRadioScript(stories) {
             const today = new Intl.DateTimeFormat('en-GB', { 
                 weekday: 'long', day: 'numeric', month: 'long' 
             }).format(new Date());
 
-            let script = `Here is your briefing for ${today}. \n\n`;
+            let script = `Hello, and welcome to your briefing for ${today}. `;
+            script += "Here are the top stories you need to know right now.\n\n";
             
-            script += `Our top story: ${stories[0].title}. ${stories[0].context} \n\n`;
+            script += `We begin with our top story: ${stories[0].title}. ${stories[0].context}\n\n`;
             
-            if (stories[1]) script += `In other news, ${stories[1].title}. ${stories[1].context} \n\n`;
-            if (stories[2]) script += `Meanwhile, ${stories[2].title}. ${stories[2].context} \n\n`;
-            if (stories[3]) script += `And finally, ${stories[3].title}. ${stories[3].context} \n\n`;
+            if (stories[1]) {
+                script += `Turning to our next development: ${stories[1].title}. ${stories[1].context}\n\n`;
+            }
+            if (stories[2]) {
+                script += `In other global news, ${stories[2].title}. ${stories[2].context}\n\n`;
+            }
+            if (stories[3]) {
+                script += `Meanwhile, ${stories[3].title}. ${stories[3].context}\n\n`;
+            }
+            if (stories[4]) {
+                script += `And shifting focus slightly, ${stories[4].title}. ${stories[4].context}\n\n`;
+            }
             
-            script += `That is your briefing. Stay informed.`;
+            script += `That is your briefing for today. Stay informed, and have a wonderful day.`;
             return script;
         }
 
-        // 3. TEXT-TO-SPEECH WITH CONTROLS
-        function speakScript(script) {
-            updateStatus("Playing audio briefing...", true);
-            document.getElementById('stopBtn').style.display = 'block'; // Show stop button
-            synthesizer.cancel();
-
-            const sentences = script.match(/[^\.!\?]+[\.!\?]+/g) || [script];
-            const outputDiv = document.getElementById('script-output');
-            outputDiv.style.display = 'block';
-            outputDiv.innerHTML = sentences.map((s, i) => `<span id="sent-${i}">${s.trim()} </span>`).join(' ');
-
-            let current = 0;
-
-            function speakNext() {
-                if (current >= sentences.length) {
-                    finishBriefing();
-                    return;
-                }
-
-                document.querySelectorAll('#script-output span').forEach(el => el.classList.remove('highlight'));
-                const currentEl = document.getElementById(`sent-${current}`);
-                if (currentEl) {
-                    currentEl.classList.add('highlight');
-                    currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-
-                currentUtterance = new SpeechSynthesisUtterance(sentences[current]);
-                currentUtterance.voice = getBestVoice();
-                currentUtterance.rate = 0.9; // Slower, more natural pacing
-                currentUtterance.pitch = 1.0;
-
-                currentUtterance.onend = () => { current++; speakNext(); };
-                currentUtterance.onerror = () => { current++; speakNext(); };
-
-                synthesizer.speak(currentUtterance);
+        // 3. PLAY AUDIO VIA STREAMELEMENTS (Neural Voice)
+        function playAudio(script) {
+            updateStatus("Generating neural audio...", true);
+            document.getElementById('stopBtn').style.display = 'block';
+            
+            // Stop any existing audio
+            if (audioPlayer) {
+                audioPlayer.pause();
+                audioPlayer = null;
             }
 
-            speakNext();
+            // StreamElements API: Free, no key, uses high-quality Amazon Polly voices
+            const encodedText = encodeURIComponent(script);
+            const audioUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodedText}`;
+            
+            audioPlayer = new Audio(audioUrl);
+            
+            audioPlayer.onplay = () => {
+                updateStatus("Playing briefing...", true);
+            };
+            
+            audioPlayer.onended = () => {
+                finishBriefing();
+            };
+            
+            audioPlayer.onerror = () => {
+                updateStatus("Audio generation failed. Please try again.");
+                finishBriefing();
+            };
+
+            audioPlayer.play().catch(err => {
+                console.error("Audio play failed:", err);
+                updateStatus("Tap 'Generate & Play' again to start audio.");
+                finishBriefing();
+            });
         }
 
         // 4. CONTROLLERS
         window.startBriefing = async function() {
             const btn = document.getElementById('generateBtn');
             btn.disabled = true;
-            document.getElementById('script-output').style.display = 'none';
+            document.getElementById('transcript').style.display = 'none';
             document.getElementById('status').innerText = "";
 
             try {
                 const stories = await fetchBriefingData();
-                updateStatus("Preparing script...");
-                const script = buildConversationalScript(stories);
-                speakScript(script);
+                updateStatus("Writing radio script...");
+                const script = buildRadioScript(stories);
+                
+                // Show transcript
+                const transcriptDiv = document.getElementById('transcript');
+                transcriptDiv.style.display = 'block';
+                transcriptDiv.innerText = script;
+                
+                // Play audio
+                playAudio(script);
             } catch (error) {
                 console.error("Briefing Error:", error);
                 updateStatus(`Error: ${error.message}. Please try again.`);
@@ -293,15 +288,18 @@
         };
 
         window.stopBriefing = function() {
-            synthesizer.cancel(); // Immediately stop speaking
+            if (audioPlayer) {
+                audioPlayer.pause();
+                audioPlayer.currentTime = 0;
+                audioPlayer = null;
+            }
             finishBriefing();
         };
 
         function finishBriefing() {
             updateStatus("Briefing complete.");
             document.getElementById('generateBtn').disabled = false;
-            document.getElementById('stopBtn').style.display = 'none'; // Hide stop button
-            document.querySelectorAll('#script-output span').forEach(el => el.classList.remove('highlight'));
+            document.getElementById('stopBtn').style.display = 'none';
         }
 
         function updateStatus(msg, isPlaying = false) {
