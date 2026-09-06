@@ -28,25 +28,37 @@
             -webkit-text-fill-color: transparent;
             margin-bottom: 8px;
         }
-        .subtitle { color: #94a3b8; font-size: 1rem; font-weight: 400; }
+        .subtitle { color: #94a3b8; font-size: 1rem; font-weight: 400; margin-bottom: 10px; }
+        .voice-info { color: #64748b; font-size: 0.85rem; font-style: italic; }
+        
+        .controls { display: flex; gap: 12px; margin-bottom: 20px; }
         .btn {
-            width: 100%;
-            padding: 16px 32px;
+            flex: 1;
+            padding: 16px 24px;
             font-size: 1.05rem;
             font-weight: 600;
             color: white;
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
             border: none;
             border-radius: 50px;
             cursor: pointer;
             transition: all 0.3s ease;
-            box-shadow: 0 10px 25px -5px rgba(139, 92, 246, 0.4);
-            margin-bottom: 20px;
             -webkit-tap-highlight-color: transparent;
         }
-        .btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 15px 30px -5px rgba(139, 92, 246, 0.6); }
-        .btn:active:not(:disabled) { transform: translateY(0); }
-        .btn:disabled { background: #334155; color: #64748b; box-shadow: none; cursor: not-allowed; }
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            box-shadow: 0 10px 25px -5px rgba(139, 92, 246, 0.4);
+        }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 15px 30px -5px rgba(139, 92, 246, 0.6); }
+        .btn-primary:disabled { background: #334155; color: #64748b; box-shadow: none; cursor: not-allowed; }
+        
+        .btn-stop {
+            flex: 0.4;
+            background: #ef4444;
+            box-shadow: 0 10px 25px -5px rgba(239, 68, 68, 0.4);
+            display: none; /* Hidden by default */
+        }
+        .btn-stop:hover { background: #dc2626; transform: translateY(-2px); }
+
         #status {
             text-align: center;
             font-size: 0.9rem;
@@ -106,15 +118,6 @@
             border-radius: 6px;
             transition: all 0.3s ease;
         }
-        .error-msg {
-            color: #f87171;
-            background: rgba(248, 113, 113, 0.1);
-            padding: 15px;
-            border-radius: 12px;
-            border: 1px solid rgba(248, 113, 113, 0.2);
-            text-align: center;
-            display: none;
-        }
     </style>
 </head>
 <body>
@@ -122,30 +125,41 @@
     <div class="container">
         <div class="header">
             <h1>The Briefing</h1>
-            <p class="subtitle">Deep context. Ultra-reliable. 100% free. Listen anytime.</p>
+            <p class="subtitle">Clean, curated global news. 100% free. Listen anytime.</p>
+            <p class="voice-info" id="voiceInfo">Detecting best available voice...</p>
         </div>
         
-        <button id="generateBtn" class="btn" onclick="startBriefing()">Generate & Play Briefing</button>
+        <div class="controls">
+            <button id="generateBtn" class="btn btn-primary" onclick="startBriefing()">Generate & Play</button>
+            <button id="stopBtn" class="btn btn-stop" onclick="stopBriefing()">Stop</button>
+        </div>
         
         <div id="progress-bar" class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
         <p id="status"></p>
-        <div id="error-box" class="error-msg"></div>
         
-        <div id="script-output"></div>
+        <div id="script-output"></div it>
     </div>
 
     <script>
         let synthesizer = window.speechSynthesis;
         let voices = [];
+        let currentUtterance = null;
 
-        function loadVoices() { voices = synthesizer.getVoices(); }
+        function loadVoices() { 
+            voices = synthesizer.getVoices(); 
+            const bestVoice = getBestVoice();
+            if (bestVoice) {
+                document.getElementById('voiceInfo').innerText = `Using voice: ${bestVoice.name}`;
+            }
+        }
         loadVoices();
         if (speechSynthesis.onvoiceschanged !== undefined) {
             speechSynthesis.onvoiceschanged = loadVoices;
         }
 
         function getBestVoice() {
-            const preferred = ["Natural", "Neural", "Google", "Microsoft", "Samantha", "Daniel", "Aria", "Karen"];
+            // Aggressively target high-quality, natural-sounding voices
+            const preferred = ["Samantha", "Daniel", "Karen", "Natural", "Neural", "Google UK English Female", "Google US English"];
             for (let keyword of preferred) {
                 const match = voices.find(v => v.name.includes(keyword) && v.lang.startsWith('en'));
                 if (match) return match;
@@ -153,71 +167,45 @@
             return voices.find(v => v.lang.startsWith('en')) || voices[0];
         }
 
-        // Helper: Fetch with a strict timeout to prevent mobile hangs
-        async function fetchWithTimeout(url, ms = 5000) {
-            const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), ms);
-            try {
-                const response = await fetch(url, { signal: controller.signal });
-                clearTimeout(id);
-                return response;
-            } catch (error) {
-                clearTimeout(id);
-                throw error;
-            }
+        // Rigorous text cleaner to ensure NO garbage reaches the speaker
+        function cleanText(text) {
+            if (!text) return "";
+            return text
+                .replace(/\[.*?\]\(.*?\)/g, '') // Remove markdown links [text](url)
+                .replace(/https?:\/\/\S+/g, '') // Remove any stray URLs
+                .replace(/Published Time:.*?Z/gi, '') // Remove timestamps
+                .replace(/Skip to content/gi, '')
+                .replace(/<[^>]*>/g, '') // Remove any remaining HTML tags
+                .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+                .trim();
         }
 
-        // 1. FETCH NEWS & DEEP CONTEXT (Ultra-Resilient)
+        // 1. FETCH NEWS
         async function fetchBriefingData() {
             updateStatus("Fetching top global stories...");
             document.getElementById('progress-bar').style.display = 'block';
-            document.getElementById('progress-fill').style.width = '20%';
+            document.getElementById('progress-fill').style.width = '50%';
 
-            // Using rss2json: highly reliable, CORS-friendly, no API key needed for basic use
             const RSS_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
             const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(RSS_URL)}`;
             
-            const response = await fetchWithTimeout(apiUrl, 8000);
-            if (!response.ok) throw new Error("Failed to fetch RSS feed");
+            const response = await fetch(apiUrl);
+            if (!response.ok) throw new Error("Failed to fetch news feed");
             
             const data = await response.json();
-            if (data.status !== 'ok') throw new Error("RSS service returned an error");
+            if (data.status !== 'ok') throw new Error("News service returned an error");
             
             const items = data.items.slice(0, 4);
             const stories = [];
 
-            for (let i = 0; i < items.length; i++) {
-                const item = items[i];
+            for (let item of items) {
                 const title = item.title || "Untitled";
-                const link = item.link || "";
-                // Clean HTML tags from the default description
-                let context = item.description ? item.description.replace(/<[^>]*>/g, '').trim() : "";
+                // Clean the description rigorously
+                let context = cleanText(item.description);
                 
-                // Attempt to get deeper context from the actual article (with a strict 4-second timeout)
-                if (link && i < 3 && context.length < 150) { 
-                    try {
-                        updateStatus(`Gathering deeper context for: ${title.substring(0, 30)}...`);
-                        document.getElementById('progress-fill').style.width = `${20 + (i * 20)}%`;
-                        
-                        const jinaRes = await fetchWithTimeout(`https://r.jina.ai/${link}`, 4000);
-                        const fullText = await jinaRes.text();
-                        
-                        // Extract meaningful sentences
-                        const sentences = fullText.match(/[^\.!\?]+[\.!\?]+/g) || [];
-                        const meaningful = sentences.filter(s => 
-                            s.length > 50 && 
-                            !s.toLowerCase().includes("copyright") && 
-                            !s.toLowerCase().includes("subscribe") &&
-                            !s.toLowerCase().includes("click here")
-                        ).slice(1, 4); 
-                        
-                        if (meaningful.length >= 2) {
-                            context = meaningful.join(" ");
-                        }
-                    } catch (e) {
-                        // Graceful fallback: if Jina fails or times out, we just use the RSS description
-                        console.log("Deep fetch skipped/failed, using RSS description");
-                    }
+                // If the cleaned context is too short, use a generic fallback so it doesn't sound broken
+                if (context.length < 20) {
+                    context = "Details are still emerging on this developing story.";
                 }
                 stories.push({ title, context });
             }
@@ -237,26 +225,18 @@
             
             script += `Our top story: ${stories[0].title}. ${stories[0].context} \n\n`;
             
-            if (stories[1]) {
-                script += `In other news, ${stories[1].title}. ${stories[1].context} \n\n`;
-            }
-            
-            if (stories[2]) {
-                script += `Meanwhile, ${stories[2].title}. ${stories[2].context} \n\n`;
-            }
-            
-            if (stories[3]) {
-                script += `And finally, ${stories[3].title}. ${stories[3].context} \n\n`;
-            }
+            if (stories[1]) script += `In other news, ${stories[1].title}. ${stories[1].context} \n\n`;
+            if (stories[2]) script += `Meanwhile, ${stories[2].title}. ${stories[2].context} \n\n`;
+            if (stories[3]) script += `And finally, ${stories[3].title}. ${stories[3].context} \n\n`;
             
             script += `That is your briefing. Stay informed.`;
             return script;
         }
 
-        // 3. TEXT-TO-SPEECH WITH KARAOKE HIGHLIGHTING
+        // 3. TEXT-TO-SPEECH WITH CONTROLS
         function speakScript(script) {
             updateStatus("Playing audio briefing...", true);
-            document.getElementById('error-box').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'block'; // Show stop button
             synthesizer.cancel();
 
             const sentences = script.match(/[^\.!\?]+[\.!\?]+/g) || [script];
@@ -268,8 +248,7 @@
 
             function speakNext() {
                 if (current >= sentences.length) {
-                    updateStatus("Briefing complete.");
-                    document.getElementById('generateBtn').disabled = false;
+                    finishBriefing();
                     return;
                 }
 
@@ -280,40 +259,49 @@
                     currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }
 
-                const utterance = new SpeechSynthesisUtterance(sentences[current]);
-                utterance.voice = getBestVoice();
-                utterance.rate = 0.95; 
-                utterance.pitch = 1.0;
+                currentUtterance = new SpeechSynthesisUtterance(sentences[current]);
+                currentUtterance.voice = getBestVoice();
+                currentUtterance.rate = 0.9; // Slower, more natural pacing
+                currentUtterance.pitch = 1.0;
 
-                utterance.onend = () => { current++; speakNext(); };
-                utterance.onerror = () => { current++; speakNext(); };
+                currentUtterance.onend = () => { current++; speakNext(); };
+                currentUtterance.onerror = () => { current++; speakNext(); };
 
-                synthesizer.speak(utterance);
+                synthesizer.speak(currentUtterance);
             }
 
             speakNext();
         }
 
-        // 4. MAIN CONTROLLER
-        async function startBriefing() {
+        // 4. CONTROLLERS
+        window.startBriefing = async function() {
             const btn = document.getElementById('generateBtn');
             btn.disabled = true;
             document.getElementById('script-output').style.display = 'none';
-            document.getElementById('error-box').style.display = 'none';
+            document.getElementById('status').innerText = "";
 
             try {
                 const stories = await fetchBriefingData();
-                updateStatus("Weaving conversational script...");
+                updateStatus("Preparing script...");
                 const script = buildConversationalScript(stories);
                 speakScript(script);
             } catch (error) {
                 console.error("Briefing Error:", error);
-                const errorBox = document.getElementById('error-box');
-                errorBox.innerText = `Failed to generate briefing. Details: ${error.message}. Please check your internet connection and try again.`;
-                errorBox.style.display = 'block';
-                updateStatus("Ready to try again.");
+                updateStatus(`Error: ${error.message}. Please try again.`);
                 btn.disabled = false;
             }
+        };
+
+        window.stopBriefing = function() {
+            synthesizer.cancel(); // Immediately stop speaking
+            finishBriefing();
+        };
+
+        function finishBriefing() {
+            updateStatus("Briefing complete.");
+            document.getElementById('generateBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'none'; // Hide stop button
+            document.querySelectorAll('#script-output span').forEach(el => el.classList.remove('highlight'));
         }
 
         function updateStatus(msg, isPlaying = false) {
@@ -324,8 +312,6 @@
                 el.innerText = msg;
             }
         }
-        
-        window.startBriefing = startBriefing;
     </script>
 </body>
 </html>
