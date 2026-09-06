@@ -121,6 +121,17 @@
             box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
             white-space: pre-wrap;
         }
+        .error-box {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+            margin-top: 15px;
+            display: none;
+            font-size: 0.95rem;
+        }
     </style>
 </head>
 <body>
@@ -139,6 +150,7 @@
         
         <div id="progress-bar" class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
         <p id="status"></p>
+        <div id="error-box" class="error-box"></div>
         
         <div id="transcript"></div>
     </div>
@@ -146,24 +158,23 @@
     <script>
         let audioPlayer = null;
 
-        // Rigorous text cleaner to ensure NO garbage reaches the speaker
         function cleanText(text) {
             if (!text) return "";
             return text
-                .replace(/\[.*?\]\(.*?\)/g, '') // Remove markdown links
-                .replace(/https?:\/\/\S+/g, '') // Remove URLs
-                .replace(/Published Time:.*?Z/gi, '') // Remove timestamps
+                .replace(/\[.*?\]\(.*?\)/g, '')
+                .replace(/https?:\/\/\S+/g, '')
+                .replace(/Published Time:.*?Z/gi, '')
                 .replace(/Skip to content/gi, '')
-                .replace(/<[^>]*>/g, '') // Remove HTML tags
-                .replace(/\s+/g, ' ') // Normalize spaces
+                .replace(/<[^>]*>/g, '')
+                .replace(/\s+/g, ' ')
                 .trim();
         }
 
-        // 1. FETCH NEWS
         async function fetchBriefingData() {
             updateStatus("Fetching top global stories...");
             document.getElementById('progress-bar').style.display = 'block';
             document.getElementById('progress-fill').style.width = '50%';
+            document.getElementById('error-box').style.display = 'none';
 
             const RSS_URL = "https://feeds.bbci.co.uk/news/world/rss.xml";
             const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(RSS_URL)}`;
@@ -174,19 +185,19 @@
             const data = await response.json();
             if (data.status !== 'ok') throw new Error("News service returned an error");
             
-            // Fetch top 5 stories for a richer briefing
-            const items = data.items.slice(0, 5);
+            const items = data.items.slice(0, 4); // Reduced to 4 to guarantee perfect length
             const stories = [];
 
             for (let item of items) {
                 const title = item.title || "Untitled";
-                // Use 'content' if available for more depth, otherwise fall back to 'description'
                 let rawContext = item.content || item.description || "";
                 let context = cleanText(rawContext);
                 
-                // Ensure we have a meaningful sentence
-                if (context.length < 30) {
-                    context = "Details are still emerging on this developing story.";
+                // STRICT LENGTH LIMIT: Keep context punchy to avoid API URL limits
+                if (context.length > 120) {
+                    context = context.substring(0, 120).trim() + "...";
+                } else if (context.length < 30) {
+                    context = "Details are still emerging on this story.";
                 }
                 stories.push({ title, context });
             }
@@ -196,50 +207,41 @@
             return stories;
         }
 
-        // 2. BUILD RADIO PRESENTER SCRIPT
         function buildRadioScript(stories) {
             const today = new Intl.DateTimeFormat('en-GB', { 
                 weekday: 'long', day: 'numeric', month: 'long' 
             }).format(new Date());
 
             let script = `Hello, and welcome to your briefing for ${today}. `;
-            script += "Here are the top stories you need to know right now.\n\n";
+            script += "Here are the top stories you need to know.\n\n";
             
-            script += `We begin with our top story: ${stories[0].title}. ${stories[0].context}\n\n`;
+            script += `We begin with: ${stories[0].title}. ${stories[0].context}\n\n`;
             
-            if (stories[1]) {
-                script += `Turning to our next development: ${stories[1].title}. ${stories[1].context}\n\n`;
-            }
-            if (stories[2]) {
-                script += `In other global news, ${stories[2].title}. ${stories[2].context}\n\n`;
-            }
-            if (stories[3]) {
-                script += `Meanwhile, ${stories[3].title}. ${stories[3].context}\n\n`;
-            }
-            if (stories[4]) {
-                script += `And shifting focus slightly, ${stories[4].title}. ${stories[4].context}\n\n`;
-            }
+            if (stories[1]) script += `Next, ${stories[1].title}. ${stories[1].context}\n\n`;
+            if (stories[2]) script += `In other news, ${stories[2].title}. ${stories[2].context}\n\n`;
+            if (stories[3]) script += `And finally, ${stories[3].title}. ${stories[3].context}\n\n`;
             
-            script += `That is your briefing for today. Stay informed, and have a wonderful day.`;
+            script += `That is your briefing. Stay informed.`;
             return script;
         }
 
-        // 3. PLAY AUDIO VIA STREAMELEMENTS (Neural Voice)
         function playAudio(script) {
             updateStatus("Generating neural audio...", true);
             document.getElementById('stopBtn').style.display = 'block';
+            document.getElementById('error-box').style.display = 'none';
             
-            // Stop any existing audio
             if (audioPlayer) {
                 audioPlayer.pause();
                 audioPlayer = null;
             }
 
-            // StreamElements API: Free, no key, uses high-quality Amazon Polly voices
             const encodedText = encodeURIComponent(script);
             const audioUrl = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodedText}`;
             
+            console.log("Attempting to play:", audioUrl); // For debugging
+            
             audioPlayer = new Audio(audioUrl);
+            audioPlayer.crossOrigin = "anonymous";
             
             audioPlayer.onplay = () => {
                 updateStatus("Playing briefing...", true);
@@ -249,20 +251,23 @@
                 finishBriefing();
             };
             
-            audioPlayer.onerror = () => {
-                updateStatus("Audio generation failed. Please try again.");
+            audioPlayer.onerror = (e) => {
+                console.error("Audio Error:", audioPlayer.error);
+                const errMsg = audioPlayer.error ? audioPlayer.error.message : "Unknown audio error";
+                showError(`Audio failed to load. ${errMsg}. (Text may be too long or network blocked it).`);
                 finishBriefing();
             };
 
+            // Explicitly load and play to satisfy iOS Safari requirements
+            audioPlayer.load();
             audioPlayer.play().catch(err => {
-                console.error("Audio play failed:", err);
-                updateStatus("Tap 'Generate & Play' again to start audio.");
+                console.error("Play promise rejected:", err);
+                showError("iOS blocked autoplay. Please tap 'Generate & Play' again.");
                 finishBriefing();
             });
         }
 
-        // 4. CONTROLLERS
-        window.startBriefing = async function() {
+        async function startBriefing() {
             const btn = document.getElementById('generateBtn');
             btn.disabled = true;
             document.getElementById('transcript').style.display = 'none';
@@ -273,31 +278,38 @@
                 updateStatus("Writing radio script...");
                 const script = buildRadioScript(stories);
                 
-                // Show transcript
                 const transcriptDiv = document.getElementById('transcript');
                 transcriptDiv.style.display = 'block';
                 transcriptDiv.innerText = script;
                 
-                // Play audio
                 playAudio(script);
             } catch (error) {
                 console.error("Briefing Error:", error);
-                updateStatus(`Error: ${error.message}. Please try again.`);
+                showError(`Failed to fetch news: ${error.message}`);
                 btn.disabled = false;
             }
-        };
+        }
 
-        window.stopBriefing = function() {
+        function stopBriefing() {
             if (audioPlayer) {
                 audioPlayer.pause();
                 audioPlayer.currentTime = 0;
                 audioPlayer = null;
             }
             finishBriefing();
-        };
+        }
 
         function finishBriefing() {
             updateStatus("Briefing complete.");
+            document.getElementById('generateBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'none';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('error-box');
+            el.innerText = msg;
+            el.style.display = 'block';
+            updateStatus("Ready to try again.");
             document.getElementById('generateBtn').disabled = false;
             document.getElementById('stopBtn').style.display = 'none';
         }
@@ -310,6 +322,9 @@
                 el.innerText = msg;
             }
         }
+        
+        window.startBriefing = startBriefing;
+        window.stopBriefing = stopBriefing;
     </script>
 </body>
 </html>
